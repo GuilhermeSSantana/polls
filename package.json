@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx watch src/http/server.ts"
+    "dev": "tsx watch src/http/server.ts",
+    "studio": "yarn prisma studio",
+		"masterreset": "yarn prisma generate && yarn prisma migrate reset --force && yarn migrate && yarn seed"
   },
   "keywords": [],
   "author": "",

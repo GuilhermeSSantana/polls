@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "../../lib/prisma";
 import { FastifyInstance } from "fastify";
 import { redis } from "../../lib/redis";
+import { voting } from "../../utijs/voting-pub-sub";
 
 export async function voteOnPoll(app: FastifyInstance) {
   app.post("/polls/:pollId/votes", async (request, reply) => {
@@ -17,20 +18,18 @@ export async function voteOnPoll(app: FastifyInstance) {
     const { pollId } = voteOnPollParams.parse(request.params);
     const { pollOptionId } = voteOnPollBody.parse(request.body);
 
-    let { sessionId } = request.cookies; // Obtenha o sessionId dos cookies de solicitação
+    let { sessionId } = request.cookies;
 
-    // Verifique se o usuário já votou nesta enquete
     if (sessionId) {
       const userPreviousVoteOnPoll = await prisma.vote.findUnique({
         where: {
-          sessionId_pollOptionId: {
+          sessionId_pollId: {
             sessionId,
-            pollOptionId,
+            pollId,
           },
         },
       });
 
-      // Se o usuário já votou nesta enquete, mas em uma opção diferente, exclua o voto anterior
       if (
         userPreviousVoteOnPoll &&
         userPreviousVoteOnPoll.pollOptionId !== pollOptionId
@@ -41,17 +40,23 @@ export async function voteOnPoll(app: FastifyInstance) {
           },
         });
 
-        await redis.zincrby(pollId, -1, userPreviousVoteOnPoll.pollOptionId);
-      }
-      // Se o usuário já votou nesta enquete, retorne um erro
-      else if (userPreviousVoteOnPoll) {
+        const votes = await redis.zincrby(
+          pollId,
+          -1,
+          userPreviousVoteOnPoll.pollOptionId
+        );
+
+        voting.publish(pollId, {
+          pollOptionId: userPreviousVoteOnPoll.pollOptionId,
+          votes: Number(votes),
+        });
+      } else if (userPreviousVoteOnPoll) {
         return reply
           .status(400)
           .send({ message: "Você já votou nesta enquete" });
       }
     }
 
-    // Se o usuário não tiver um sessionId, crie um novo
     if (!sessionId) {
       sessionId = randomUUID();
 
@@ -63,7 +68,6 @@ export async function voteOnPoll(app: FastifyInstance) {
       });
     }
 
-    // Crie um novo voto
     await prisma.vote.create({
       data: {
         sessionId,
@@ -72,7 +76,12 @@ export async function voteOnPoll(app: FastifyInstance) {
       },
     });
 
-    await redis.zincrby(pollId, 1, pollOptionId); // Incremente o contador de votos para a opção de enquete (pollOptionId) na enquete (pollId)
+    const votes = await redis.zincrby(pollId, 1, pollOptionId);
+
+    voting.publish(pollId, {
+      pollOptionId,
+      votes: Number(votes),
+    });
 
     return reply.status(201).send();
   });
