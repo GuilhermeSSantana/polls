@@ -2,6 +2,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../../lib/prisma";
 import { FastifyInstance } from "fastify";
+import { redis } from "../../lib/redis";
 
 export async function voteOnPoll(app: FastifyInstance) {
   app.post("/polls/:pollId/votes", async (request, reply) => {
@@ -39,6 +40,8 @@ export async function voteOnPoll(app: FastifyInstance) {
             id: userPreviousVoteOnPoll.id,
           },
         });
+
+        await redis.zincrby(pollId, -1, userPreviousVoteOnPoll.pollOptionId);
       }
       // Se o usuário já votou nesta enquete, retorne um erro
       else if (userPreviousVoteOnPoll) {
@@ -68,6 +71,8 @@ export async function voteOnPoll(app: FastifyInstance) {
         pollOptionId,
       },
     });
+
+    await redis.zincrby(pollId, 1, pollOptionId); // Incremente o contador de votos para a opção de enquete (pollOptionId) na enquete (pollId)
 
     return reply.status(201).send();
   });
